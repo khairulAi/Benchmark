@@ -1,9 +1,11 @@
+from backend.schemas import Options, Reference, TimedReference
 import json
 from pathlib import Path
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from backend import app as server
+from backend import jobs as server
+from backend.app import app
 from backend.core import (
     Extraction,
     bind_words,
@@ -21,7 +23,7 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "runs").mkdir()
     (tmp_path / "uploads").mkdir()
     monkeypatch.setattr(server, "active", None)
-    return TestClient(server.app)
+    return TestClient(app)
 
 
 def test_bengali_normalization():
@@ -189,9 +191,9 @@ def test_bad_host_rejected(client):
 
 def test_reference_schema_rejects_bad_timestamps():
     with pytest.raises(ValueError):
-        server.TimedReference(start=2, end=1, speaker="A")
+        TimedReference(start=2, end=1, speaker="A")
     with pytest.raises(ValueError):
-        server.Reference(transcript="", verified=True)
+        Reference(transcript="", verified=True)
 
 
 def test_empty_and_bad_uploads(client):
@@ -426,7 +428,7 @@ def test_single_worker_rejects_concurrent_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "worker", Worker())
     source = tmp_path / "source.wav"
     source.write_bytes(b"fixture")
-    options = server.Options(use_llm=False)
+    options = Options(use_llm=False)
     first = server.launch(source, options, "fixture.wav")
     assert first["status"] == "queued"
     with pytest.raises(server.HTTPException) as error:

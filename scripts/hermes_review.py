@@ -50,7 +50,7 @@ def main():
     parts = [instructions]
     source_files = (
         [
-            "backend/feature_routes.py",
+            "backend/routes/live.py",
             "backend/streaming.py",
             "backend/voices.py",
             "backend/enhancement.py",

@@ -6,7 +6,9 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from backend import app as server, voices, feature_routes, llm
+from backend import jobs as server, voices, llm
+from backend.routes import live as feature_routes
+from backend.app import app
 
 
 @pytest.fixture
@@ -16,7 +18,7 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "runs").mkdir()
     monkeypatch.setattr(server, "active", None)
     monkeypatch.setenv("VOICE_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    return TestClient(server.app)
+    return TestClient(app)
 
 
 def test_profile_route_precedes_static_catchall(client):
