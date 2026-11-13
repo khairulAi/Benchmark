@@ -1,0 +1,24 @@
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+
+# Local environments, model weights and private recordings
+.venv/
+.runtime/
+.bootstrap/
+.uv-cache/
+models/
+data/
+audio/
+conversation/
+__pycache__/
+.pytest_cache/
+*.pyc
+meddesk-benchmark-*.json
+playwright-report/
+
+
+.ruff_cache/

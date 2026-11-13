@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="bn">
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width,initial-scale=1" name="viewport"/>
+  <title>
+   MedDesk · বাংলা Speech Benchmark
+  </title>
+  <link href="benchmark.css" rel="stylesheet"/>
+ </head>
+ <body>
+  <header>
+   <a class="brand" href="/">
+    m
+    <b>
+     MedDesk
+    </b>
+    <span>
+     BENCHMARK LAB
+    </span>
+   </a>
+   <nav>
+    <a href="/">
+     Recording studio
+    </a>
+    <button id="refresh">
+     Refresh runs
+    </button>
+   </nav>
+  </header>
+  <main>
+   <div class="eyebrow">
+    বাংলা · CPU INT8 · REPRODUCIBLE RUNS
+   </div>
+   <h1>
+    Conversation to evidence.
+   </h1>
+   <p class="lead">
+    বাংলা কথোপকথন → transcript → speaker → ডাক্তার / রোগী → structured facts → measured results.
+   </p>
+   <div class="boundary">
+    Research tool. Model output is a draft, not clinical advice. Speaker clusters are not voice identities. Reference answers are kept separate from inference. Audio stays local; transcript is sent to your configured provider only when enabled.
+   </div>
+   <div class="health" id="health" role="status">
+    Checking backend…
+   </div>
+   <div class="layout">
+    <section class="card">
+     <h2>
+      01 / Configure a run
+     </h2>
+     <label>
+      STT model
+      <select id="stt-profile">
+       <option value="zipformer">
+        Bengali Zipformer · INT8
+       </option>
+       <option value="indicconformer">
+        Bengali IndicConformer · INT8
+       </option>
+       <option value="bangla_asr">
+        BanglaASR · INT8
+       </option>
+       <option value="vivasoft">
+        Vivasoft Bengali · INT8
+       </option>
+      </select>
+     </label>
+     <label>
+      Audio source
+      <select id="source">
+       <option value="sample">
+        Provided Bengali conversation
+       </option>
+       <option value="upload">
+        Upload conversation
+       </option>
+      </select>
+     </label>
+     <input accept="audio/*,video/mp4" hidden="" id="audio-file" type="file"/>
+     <audio controls="" id="source-audio" preload="metadata" src="/api/sample/audio">
+     </audio>
+     <p class="muted" id="sample-name">
+     </p>
+     <div class="grid">
+      <label>
+       Start at (seconds)
+       <input id="offset" max="7200" min="0" type="number" value="0"/>
+      </label>
+      <label>
+       Clip length (0 = full)
+       <input id="duration" max="1200" min="0" type="number" value="120"/>
+      </label>
+     </div>
+     <div class="grid">
+      <label>
+       Known speaker count
+       <input id="speakers" max="6" min="1" type="number" value="2"/>
+      </label>
+      <label>
+       Processing strategy
+       <select id="strategy">
+        <option value="batch">
+         Single file invocation
+        </option>
+        <option value="chunks">
+         Independent buffered chunks
+        </option>
+       </select>
+      </label>
+     </div>
+     <div class="grid">
+      <label>
+       Chunk length (seconds)
+       <input id="chunk" max="120" min="10" type="number" value="30"/>
+      </label>
+      <label>
+       Noise experiment
+       <select id="noise">
+        <option value="">
+         Original audio
+        </option>
+        <option value="20">
+         White noise · 20 dB SNR
+        </option>
+        <option value="10">
+         White noise · 10 dB SNR
+        </option>
+        <option value="0">
+         White noise · 0 dB SNR
+        </option>
+       </select>
+      </label>
+     </div>
+     <label>
+      Status delivery
+      <select id="delivery">
+       <option value="sse">
+        Server-Sent Events
+       </option>
+       <option value="poll">
+        Polling · every 2 seconds
+       </option>
+      </select>
+     </label>
+     <p class="muted">
+      ONNX models internally decode ≤15-second acoustic chunks, including in single-file mode. These deliver job updates, not live ASR. Chunks are processed from an uploaded recording; chunk boundaries can lose context.
+     </p>
+     <label class="check">
+      <input checked="" id="llm" type="checkbox"/>
+      Run LLM role detection &amp; extraction
+     </label>
+     <label class="check">
+      <input id="permission" type="checkbox"/>
+      I have permission to send this conversation's transcript to the configured provider.
+     </label>
+     <div class="feature-options">
+      <label class="check">
+       <input id="denoise" type="checkbox"/>
+       Apply local GTCRN noise removal
+      </label>
+      <label class="check">
+       <input id="identify-voices" type="checkbox"/>
+       Match against enrolled voice signatures
+      </label>
+      <p class="muted">
+       Optional stages. Voice templates stay local. Noise removal may affect speech; compare the enhanced audio.
+      </p>
+     </div>
+     <button class="primary" id="start">
+      Run benchmark →
+     </button>
+     <button hidden="" id="extract-again">
+      Re-run extraction as a new audited run
+     </button>
+     <div aria-live="polite" id="progress" role="status">
+     </div>
+     <h3>
+      Recent runs
+     </h3>
+     <div id="runs">
+     </div>
+    </section>
+    <section class="results">
+     <div class="card">
+      <div class="bar">
+       <h2>
+        02 / Results
+       </h2>
+       <a hidden="" id="download">
+        Download run JSON ↓
+       </a>
+      </div>
+      <div class="empty" id="empty">
+       Choose a conversation and start a run.
+       <br/>
+       Recorded measurements appear here.
+      </div>
+      <div hidden="" id="result">
+       <div class="metrics" id="metrics">
+       </div>
+       <div id="warnings">
+       </div>
+       <div class="tabs">
+        <button data-tab="transcript">
+         Transcript
+        </button>
+        <button data-tab="facts">
+         Structured facts
+        </button>
+        <button data-tab="ledger">
+         Calls &amp; environment
+        </button>
+       </div>
+       <div hidden="" id="enhanced-player">
+        <h3>
+         Enhanced clip
+        </h3>
+        <audio controls="" id="enhanced-audio" preload="none">
+        </audio>
+        <p class="muted">
+         Compare with the original source. Playback is relative to the analyzed clip.
+        </p>
+       </div>
+       <div class="tab" id="transcript">
+       </div>
+       <div class="tab" hidden="" id="facts">
+       </div>
+       <pre class="tab" hidden="" id="ledger"></pre>
+      </div>
+     </div>
+     <div class="card">
+      <h2>
+       03 / Human reference &amp; scoring
+      </h2>
+      <p class="muted">
+       Provided DOCX is a reading prompt, not verified ground truth. Listen to the exact analyzed clip and correct this reference. Never paste the full script as reference for a shorter clip.
+      </p>
+      <button id="load-script">
+       Load supplied script as unverified draft
+      </button>
+      <textarea id="reference" placeholder="এই clip-এ আসলে বলা কথার সঠিক transcript…" rows="9"></textarea>
+      <label class="check">
+       <input id="verified" type="checkbox"/>
+       I listened to this exact clip and verified the reference transcript.
+      </label>
+      <label>
+       Verification note
+       <input id="verification-note" placeholder="Reviewer, clip range, corrections…"/>
+      </label>
+      <details>
+       <summary>
+        Optional timed reference &amp; expected facts
+       </summary>
+       <p class="muted">
+        Times are relative to the analyzed clip. Leave empty when unavailable. DER is not fabricated without timed speaker references. Fact scoring uses exact normalized values.
+       </p>
+       <label>
+        Speaker segments JSON
+        <textarea id="timed-reference" placeholder='[{"start":0,"end":2,"speaker":"A","role":"patient"}]' rows="5"></textarea>
+       </label>
+       <label>
+        Expected facts JSON
+        <textarea id="expected-facts" placeholder='[{"category":"symptom","value":"পিপাসা","polarity":"present"}]' rows="5"></textarea>
+       </label>
+      </details>
+      <button disabled="" id="score">
+       Save reference &amp; evaluate
+      </button>
+      <pre id="scores"></pre>
+     </div>
+     <div class="card">
+      <h2>
+       04 / Compare runs
+      </h2>
+      <p class="muted">
+       Select comparable runs below. A fair comparison uses the same source audio, clip and verified reference; change one factor at a time. Total latency is upload-complete → final output (upload time shown separately). No live speech latency is claimed.
+      </p>
+      <div class="table-wrap" id="comparison">
+      </div>
+      <button id="export-comparison">
+       Export comparison CSV
+      </button>
+     </div>
+    </section>
+   </div>
+   <div class="feature-grid">
+    <section class="card">
+     <h2>
+      05 / Live conversation
+     </h2>
+     <p class="muted">
+      Speak in Bengali. Live draft uses a small streaming model. Stop runs the selected final STT, speaker and optional Mistral analysis. Audio is saved locally for that final run.
+     </p>
+     <label class="check">
+      <input id="live-consent" type="checkbox"/>
+      I have permission to record this conversation.
+     </label>
+     <div class="bar">
+      <button class="primary" id="live-start">
+       Start live microphone
+      </button>
+      <button disabled="" id="live-stop">
+       Stop &amp; analyze
+      </button>
+     </div>
+     <p id="live-status" role="status">
+      Checking live model…
+     </p>
+     <textarea aria-label="Live Bengali transcript" id="live-text" placeholder="Live draft appears here…" readonly="" rows="5"></textarea>
+     <p class="muted">
+      Live drafts can change. Speaker identities and doctor/patient roles appear after final analysis.
+     </p>
+    </section>
+    <section class="card">
+     <h2>
+      06 / Voice signatures
+     </h2>
+     <p class="muted">
+      Enroll 3–30 seconds of one speaker. Signatures are encrypted on this computer; the enrollment recording is deleted after processing. Matching is a prediction and can return unknown.
+     </p>
+     <form id="voice-form">
+      <label>
+       Speaker name
+       <input id="voice-name" maxlength="120" required=""/>
+      </label>
+      <label>
+       Role
+       <select id="voice-role">
+        <option value="doctor">
+         Doctor
+        </option>
+        <option value="patient">
+         Patient
+        </option>
+        <option value="unknown">
+         Unknown
+        </option>
+       </select>
+      </label>
+      <label>
+       Single-speaker audio
+       <input accept="audio/*,video/mp4" id="voice-file" required="" type="file"/>
+      </label>
+      <label class="check">
+       <input id="voice-consent" required="" type="checkbox"/>
+       I have this speaker’s permission to create and store their biometric voice signature.
+      </label>
+      <button id="voice-enroll" type="submit">
+       Create encrypted signature
+      </button>
+     </form>
+     <div id="voice-profiles" role="status">
+     </div>
+    </section>
+   </div>
+  </main>
+  <div id="message" role="alert">
+  </div>
+  <script src="benchmark.js?v=20261113-models">
+  </script>
+  <script src="features.js?v=20261113-live">
+  </script>
+ </body>
+</html>

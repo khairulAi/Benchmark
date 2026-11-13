@@ -1,0 +1,1 @@
+"""MedDesk Bengali speech benchmark."""

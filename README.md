@@ -1,171 +1,185 @@
-# MedDesk Voice Benchmark Studio
+# MedDesk Bengali Speech Benchmark — v2.1
 
-A local HTML, CSS and JavaScript workspace for collecting structured voice recordings against reading scripts. Participants can read as different doctor roles, record or upload takes, review audio and export a portable dataset.
+A local research workspace for Bengali doctor–patient conversations: audio collection, CPU speech recognition, speaker diarization, role attribution, evidence-backed structured extraction and reproducible evaluation.
 
-**Delivery scope:** voice data collection and human review. This version does not generate biometric voice signatures, automatically identify speakers or calculate benchmark accuracy scores.
+বাংলা নির্দেশনা: [USER-GUIDE-BN.md](USER-GUIDE-BN.md).
 
-## Requirements
+## Start here
 
-- Windows with PowerShell and a current Chrome or Edge browser. Chrome was verified; Edge has not been separately tested.
-- A microphone and browser microphone permission for live recording.
-- The complete extracted project folder, including `audio/`.
+1. Keep your provider key in `.env` (`LLM_API_KEY`). Never commit it.
+2. On this configured computer, run **START-BENCHMARK.cmd** (START-MEDDESK.cmd also forwards to it).
+3. The launcher reuses the workspace server or chooses a free port from 8787-8792. It does not stop other apps.
+4. Open the address printed by the launcher in Chrome (normally **http://localhost:8787/benchmark.html**).
+5. Choose the supplied conversation or upload audio. Start with a 120-second clip.
+6. Confirm permission before sending transcript to the configured provider, or disable LLM for local-only processing.
+7. Run, review the speaker-attributed transcript and cited facts, then download the run JSON.
 
-No npm installation, database service, API key or paid service is required. Internet access is optional: Google Fonts provides typography, with local font fallbacks when offline.
+The original recording interface remains at http://localhost:8787/. Its data stays in browser IndexedDB; benchmark runs are stored by the backend in `data/runs/`. These are separate stores. See RECORDING-STUDIO.md for the collection interface.
 
-## Quick start
+## Installation on another Windows machine
 
-1. Extract the ZIP to a local folder. Do not run from inside the ZIP.
-2. Double-click `START-MEDDESK.cmd`.
-3. Keep the server window open while working.
-4. Open **http://localhost:8787/** directly in Chrome. The launcher attempts to open the default browser; open the address manually if needed.
-5. On first launch, check that the three reference participants and recordings appear.
+Use Python and run **SETUP-BACKEND.cmd**. It installs project-local Python 3.11, dependencies and the small Bengali Zipformer INT8 model plus speaker weights. Several GB of disk space and internet access are needed for initial setup. No GPU is required. An existing Python installation is needed to bootstrap uv. Downloads and installation can take time.
 
-To stop the server, close its window or press **Ctrl+C** there. Restart it with the same launcher. Use the same browser profile and address to access saved work.
+For this machine, C: had insufficient disk space. Model weights and conversion tools are located under **E:/MedDesk-model-cache/**. `.env` contains `MODELS_DIR` for that location. Do not remove that folder while using the backend. The production environment is `.venv` in this project. The default is Bengali Zipformer INT8. IndicConformer, BanglaASR and Vivasoft are alternative profiles; only installed profiles can be selected. STT and speaker models are loaded sequentially to limit memory. CPU speed and memory vary by audio length and machine.
 
-Do not use VS Code's embedded preview for recording or playback: playback failed in that preview during use, while it worked in Chrome. Opening `index.html` as a file is not the supported launch method.
+For a fresh machine, copy `.env.example` to `.env`, enter a key and optionally configure a model directory on a drive with space. The example is safe to share; `.env` is not. The setup script uses the project drive for package cache by default, so choose a project drive with sufficient space. The original conversation and reference recordings are excluded from Git; supply them separately with appropriate permission or upload new audio.
 
-## Included reference material
+## Models and execution
 
-| Participant | Initial role | Audio file |
-| --- | --- | --- |
-| Khairul | Dr. Kabir | `audio/khairul.aac` |
-| Mahamudul | Doctor 2 | `audio/mahamudul.mp4` |
-| Shawon | Doctor 3 | `audio/shawon.ogg` |
+| Component | Implementation |
+| --- | --- |
+| Default Bengali STT | SayedShaun/bangla-zipformer-onnx INT8, sherpa-onnx CPU, ≤15-second acoustic chunks |
+| Alternative STT | OpenVoiceOS Bengali IndicConformer INT8; existing BanglaASR/Vivasoft Whisper INT8 |
+| Speaker segmentation | Public sherpa-onnx conversion of pyannote segmentation 3.0 |
+| Speaker embeddings/clustering | 3D-Speaker ERes2Net + sherpa-onnx clustering |
+| Role detection and extraction | Model configured by LLM_MODEL through LLM_BASE_URL; currently mistralai/mistral-large-2512 through Xkiro |
+| Server | FastAPI / Uvicorn, bound to loopback |
+| UI | HTML, CSS, plain JavaScript |
 
-The supplied English voice-signature reading script is included. Doctor roles are editable placeholders, not verified identities. Reference files are imported into browser storage on the first launch of a new workspace. All reference takes start unaccepted and require review.
+Speaker clusters identify **which voice spoke when within one recording**, not a real person's name. Speaker labels may change between runs. Doctor/patient roles are inferred from the transcript and can be unknown. The embedding model was not specifically validated on Bengali clinical speech; evaluate it on your target recordings. Optional local voice enrollment now maps clusters to encrypted profiles. A similarity match is a prediction; unfamiliar or ambiguous voices remain unknown. This is not the pyannote community-1 pipeline.
 
-## Collection workflow
+The reading script and human reference are never included in the LLM input. The provider receives only the generated speaker-attributed transcript and output schema. Audio processing remains local. The provider's privacy/retention policies apply to the transcript sent to it.
 
-### 1. Select the participant and role
+Model weights are public downloads, with source URLs, the STT revision and SHA-256 hashes recorded in `models/manifest.json` (or MODELS_DIR). Review upstream model licenses for your intended deployment; the application does not grant additional rights to weights or recordings.
 
-Choose a participant, or click **+ Add** and enter a new name. Set **Role / doctor name** separately. The participant identifies the real speaker; the role identifies the character they read. One person reading three roles is still one speaker.
+## What happens in a run
 
-More than three participants can be added without editing code. Roles can be changed in the interface. This version has no participant rename or individual participant removal control.
+1. Decode and downmix to mono 16 kHz, select the requested clip.
+2. Optionally add deterministic synthetic white noise at a specified SNR (seed 42).
+3. Run Bengali transcription with word timestamps and VAD.
+4. Release STT model; load speaker diarization models and cluster voices.
+5. Match words to speaker segments by overlap. Ambiguous overlap/unmatched words are marked unknown.
+6. Optionally send the generated utterances to the configured LLM once for role attribution and structured facts.
+7. Validate JSON, speaker references and exact evidence quotes. Unsupported evidence is discarded with warnings. Semantic correctness still requires human review.
+8. Save timings, invocation ledger, environment/model versions, outputs and warnings.
 
-### 2. Prepare the script
+A failed LLM call does not erase successful STT/diarization outputs: the run is marked partial. There are no hidden automatic retries or repair calls. Use Re-run extraction for an explicit new audited run that reuses STT/diarization; the parent run is preserved. Extraction-only latency is not full-pipeline latency. Interruptions survive as run records but are not resumed automatically. One CPU run is processed at a time; concurrent requests return HTTP 409. Refreshing or disconnecting the browser does not cancel an active run.
 
-Select a reading script, or click **+ New**. Edit the title and text directly in the page. The word count updates automatically and changes are saved locally.
+## Experiments and transport
 
-Each take captures the script text, title and role used at collection time. Later edits do not rewrite earlier takes' snapshots.
+- **Single file:** one local transcribe invocation; the decoder can internally use multiple windows.
+- **Independent chunks:** multiple local transcribe invocations using the selected chunk size. Boundaries can lose words/context; overlap stitching is not implemented.
+- **Original/noise:** compare the same clip with original audio and synthetic 20/10/0 dB noise.
+- **SSE/polling:** choose server-pushed job status or a two-second polling interval. This compares status delivery, not streaming speech recognition.
 
-### 3. Confirm collection permission
+**Live microphone:** the separate Live conversation panel sends PCM over a real WebSocket to a stateful Bengali streaming model. Stop saves the capture locally and starts the selected final STT, speaker, optional enhancement/identity and Mistral stages. Live decoder steps and final model calls are measured separately. Speaker clustering/roles are finalized after stop; continuous online speaker labeling is not claimed. Browser-based multi-model sweeps remain outside the interface; use the comparison script.
 
-Explain the actual collection and storage process, then tick the permission checkbox before recording or uploading audio. Switching participants clears the checkbox. This is an operator acknowledgement, not a signed consent form or independent proof of consent.
+## Ground truth and scoring
 
-**Reading-script clarification:** the supplied passage describes a separate proposed MedDesk system. Its statements about encrypted server storage, biometric signatures and recordings not being kept do not describe this tool. This tool retains recordings locally until deleted. Explain that distinction before collection.
+The provided DOCX is an **unverified reading script**. It must be checked against what was actually said. For a short clip, trim the reference to that exact clip; never compare a full script against a partial recording.
 
-### 4. Record or upload
+1. Listen to the exact clip and enter/correct its actual transcript.
+2. Tick the human verification checkbox and add a reviewer note.
+3. Save reference and evaluate.
+4. Optionally provide timed speaker reference segments and expected facts as JSON in the expandable controls.
 
-For a new recording:
+No verified reference means **no accuracy claim**. No timed speaker reference means DER and role accuracy remain unavailable. No expected fact list means fact F1 is unavailable. Empty expected facts (`[]`) explicitly means no facts were expected, not missing annotation.
 
-1. Select the correct participant, role and script.
-2. Confirm permission and click **Start recording**.
-3. Allow microphone access when the browser requests it.
-4. Read naturally at a steady microphone distance.
-5. Click **Stop & save**. The new take appears in **Review recordings**.
+Example timed reference, relative to clip start:
 
-For existing audio:
+```json
+[{"start": 0, "end": 2.5, "speaker": "A", "role": "patient"},
+ {"start": 2.5, "end": 6, "speaker": "B", "role": "doctor"}]
+```
 
-1. Select the correct participant, role and script, and confirm permission.
-2. Click **Upload audio** and select one or more files.
-3. All selected files are assigned to the current participant and script. Upload each speaker's files separately to avoid incorrect attribution.
+Example expected fact:
 
-Common accepted extensions include WAV, MP3, AAC, M4A/MP4, OGG, WebM and FLAC. An accepted extension does not guarantee every codec in that container will play in every browser. Microphone recording format is selected according to browser support.
+```json
+[{"category": "symptom", "value": "পিপাসা", "polarity": "present"}]
+```
 
-### 5. Review each take
+| Measurement | Definition |
+| --- | --- |
+| WER/CER | Edit-distance errors against a human-verified transcript; WER can exceed 100% |
+| Text normalization | NFC, lowercase, Bengali digits to ASCII, punctuation/symbols to spaces; CER excludes whitespace; no automatic spelling fixes |
+| DER | 10 ms frame approximation, optimal speaker permutation, zero collar, overlapping reference speech excluded; not directly comparable to published collar-based DER |
+| Role accuracy | Time-weighted doctor/patient accuracy on non-overlap annotated reference speech; unknown predictions count as wrong |
+| Fact F1 | Exact normalized category/value/polarity set matching; no semantic LLM judge or synonym expansion |
+| Latency | Backend decode-start to final result, including model loads; upload duration is a separate browser observation |
+| First STT segment | Backend start to first decoded segment; not live speech latency |
+| RTF | Total processing seconds / analyzed audio seconds |
+| Memory | Sampled server-process RSS, not total machine memory or a guaranteed limit |
+| Calls | Separate local STT/diarization invocations and outbound LLM HTTP attempts; status polling is not a model API call |
+| Cost | Token-based estimate only when both provider rates and usage exist; otherwise null/unknown; local electricity/hardware not priced |
 
-Listen for audibility, completeness, clipping, background noise and whether the intended text was spoken. Add notes and click **Accept take** when suitable; the button can toggle acceptance off again.
+Set actual provider rates in `.env` as `LLM_INPUT_USD_PER_MILLION` and `LLM_OUTPUT_USD_PER_MILLION`. Do not assume zero because Cline displayed $0. Unknown pricing does not prevent testing.
 
-Use the participant filter to narrow the list. **Audio** downloads an individual take. **Delete** removes a take after confirmation. Acceptance is a human review label, not an automated score. Export includes accepted and unaccepted takes with their review flags.
+## Reproducibility and reports
 
-For speech-to-text evaluation, the reference transcript must reflect what was actually said. This application does not transcribe recordings or automatically resolve differences between the prompt and spoken words.
+Each run is identified by a UUID and saves `job.json`, `result.json`, and (when entered) `reference.json` in `data/runs/<id>/`. Results include source SHA-256, clip boundaries, noise seed/SNR, decoding strategy, speaker count, model revision/hashes, package versions, thread count, wall timings, invocation ledger and token usage.
 
-## Saving and backups
+Open completed runs to populate the comparison table, then export CSV. Download JSON for the run audit record and any saved evaluation reference. Backend run JSON does not embed source audio: retain the source file separately and verify its SHA-256. Compare only the same source/clip/reference when assessing a strategy change. Temperature zero reduces sampling variability but is not a guarantee of deterministic provider output. A single recording is a smoke test, not proof of general Bengali clinical accuracy.
 
-### Automatic local saving
+## Tests
 
-Scripts, participants, recordings and review changes are stored in the current browser profile's IndexedDB database, named `meddesk-benchmark` for normal work.
+Run backend regression tests:
 
-Storage belongs to the exact scheme, hostname and port. `localhost:8787` and `127.0.0.1:8787` have separate workspaces; other browsers or profiles also have separate data. Clearing browser data or using private browsing can remove work. Large projects can exceed browser storage or memory limits. Export regularly.
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
-### Export a complete project
+The original browser collection checks remain at `/test.html` and use a separate IndexedDB database. See TEST-RESULTS.md for the earlier collection tests; see BENCHMARK-TEST-RESULTS.md for v2 verification and real-run limits. Runtime dependencies are listed in requirements.txt; a pinned installed-environment snapshot is provided after verification.
 
-1. Click **Export project**.
-2. Keep the downloaded `meddesk-benchmark-YYYY-MM-DD.json` file in an appropriate backup location.
-3. Export again after important collection or review sessions.
+## Security and data handling
 
-The JSON includes participants, scripts, all takes, script snapshots, roles, take numbers, timestamps, source labels, notes and acceptance flags. Audio is embedded as base64 data URLs, so separate audio files are not needed to restore it. Base64 increases file size and is not encryption.
-
-Export downloads a local copy; it does not upload the project to a remote server. Backups contain people's voices and should be shared only with intended recipients.
-
-### Restore or move to another computer
-
-1. Start the application on the destination computer or browser.
-2. Export the destination's current project first if it needs to be preserved.
-3. Click **Import project** and select the exported JSON.
-4. Confirm replacement of the current local project.
-5. Check participant and take counts, then play a recording.
-
-Import **replaces** the project; it does not merge projects. Unsupported or malformed backups are rejected. Previously downloaded backups are independent of browser storage.
-
-## Handoff to another person
-
-ZIP the complete project folder, preserving `audio/`. Include an exported project JSON separately if the recipient needs collected recordings and review progress: browser-saved changes are not included merely by zipping the source folder.
-
-The recipient should extract the ZIP, run `START-MEDDESK.cmd`, open Chrome and import the supplied backup if applicable.
-
-## Deletion behavior
-
-- **Delete** on a recording removes that take from the current browser project.
-- **Delete local project** removes local recordings and edits, and restores the default roster and script. It does not automatically reload reference recordings into the reset project.
-- Neither action deletes original files in `audio/`, downloaded recordings or exported backups.
-
-There is no in-app undo for deletion. Keep an export if restoration may be needed.
-
-## Verification
-
-On **10 November 2026**, the Chrome test page reported **ALL 10 CHECKS PASSED**. These cover initialization, participants, roles, scripts, uploads and duration, review persistence, export, import with SHA-256 audio comparisons, invalid-import handling and reload persistence.
-
-To repeat:
-
-1. Start the server.
-2. Open **http://127.0.0.1:8787/test.html** in Chrome.
-3. Wait for the final result above the embedded workspace.
-
-Tests use the separate `meddesk-benchmark-test` database and synthetic audio. Normal project data is untouched. Each run adds test records to the test database. Export content is inspected without triggering a download during the automated checks.
-
-The user separately confirmed real microphone recording, audible playback, refresh persistence and an actual export download. A supplied four-recording backup passed validation after a fix for `audio/webm;codecs=opus` import support.
-
-See [TEST-RESULTS.md](TEST-RESULTS.md) for evidence and limits. Automated tests do not assess microphone sound quality, spoken content, speaker identity or every device/browser.
+- `.env`, recordings, runs, model weights and Python environments are excluded by `.gitignore`.
+- Only explicit static assets are served; `.env`, `.git`, source code, uploads and arbitrary filesystem paths are not exposed.
+- Server binds to loopback; mutation requests from other origins are rejected.
+- API keys stay on the backend. Provider redirects are not followed, response bodies are withheld on provider errors, and the key is never included in run exports.
+- Uploads are limited to 50 MB and analyzed clips to 20 minutes on this configuration.
+- This is a local research tool, not a hosted clinical system: no authentication, database encryption, clinical decision support or production compliance certification is claimed.
 
 ## Troubleshooting
 
-| Symptom | Action |
+| Problem | Action |
 | --- | --- |
-| Page will not open | Run the launcher, keep its window open and use `http://localhost:8787/`. |
-| Port 8787 unavailable | Another instance may already be running. Try the address; close an old server window before restarting if needed. |
-| Player shows `0:00 / 0:00` | Open directly in Chrome. Read the error below the player, if shown. Download the original file to check external playback. |
-| Microphone will not start | Confirm the collection checkbox, use localhost, check browser and Windows microphone permissions, and check the input device. |
-| Data appears missing | Use the original browser profile and exact hostname/port. Import a backup if storage was cleared. |
-| Reference audio missing | Confirm `audio/` was included. Existing workspaces are not automatically reseeded; upload missing files for the correct participants. |
-| Import fails | Use an unmodified JSON exported by this tool. After a code update, press **Ctrl+Shift+R** to load the current version. |
-| Local saving fails | Export immediately if possible. Check disk space and browser storage restrictions. |
+| Backend unavailable | Run START-BENCHMARK.cmd, not the old standalone static server |
+| Port 8787 busy | Use the free port printed by the launcher; current test server is on 8788 |
+| Models not ready | Run setup; check MODELS_DIR and available drive space |
+| First run slow | Model loading and CPU transcription take time; inspect run stage and processed-audio time |
+| LLM HTTP 401/403 | Verify the provider key and access; a proxy key is not necessarily valid on the model vendor's official API |
+| Provider cost unknown | Enter actual provider token rates; this is not an inference failure |
+| Roles look wrong | Inspect diarization and transcript first, then review LLM evidence; do not treat predictions as ground truth |
+| High WER | Check exact reference/clip matching, audio quality, domain vocabulary and model suitability |
+| Browser changed | Collection IndexedDB is browser/origin-specific; server run history is separate |
 
-## Project structure
+## Important files
 
-| File | Purpose |
-| --- | --- |
-| `index.html` | Page structure and controls |
-| `style.css` | Responsive interface styles |
-| `app.js` | Recording, uploads, local storage, review and export/import |
-| `audio/` | Supplied reference files |
-| `START-MEDDESK.cmd` | Windows entry point |
-| `serve.ps1` | Loopback HTTP server on port 8787 |
-| `test.html`, `test.js` | Isolated browser integration checks |
-| `TEST-RESULTS.md` | Verification evidence and limitations |
+- `benchmark.html`, `benchmark.js`, `benchmark.css`: benchmark interface.
+- `backend/`: API, pipeline, schema/evidence validation and evaluation.
+- `scripts/prepare_models.py`: model preparation and manifest generation.
+- `tests/test_backend.py`: regression tests.
+- `index.html`, `app.js`, `style.css`: original collection studio.
+- `START-BENCHMARK.cmd`, `SETUP-BACKEND.cmd`: launch/setup.
+- `.env.example`: shareable configuration template.
 
-## Architecture and limits
+Runtime storage update (12 November 2026): .venv, .runtime and .bootstrap now use directory junctions to E:/MedDesk-model-cache/project-runtime/. Their original project paths still work. Keep that E: folder; it contains required Python dependencies, not disposable cache. Code, .env, source audio, model weights and run results were preserved.
 
-The client uses browser APIs including `MediaRecorder`, `getUserMedia`, `IndexedDB`, `Blob`, `FileReader` and object URLs. The PowerShell server serves local assets on loopback. It has no audio-upload or remote-storage endpoint.
 
-This is a local collection workspace. Accounts, authentication, encrypted biometric storage, synchronization, transcription, diarization, speaker embeddings, speaker verification and recognition scoring require additional implementation. The three reference speakers provide starter data, not evidence of broad benchmark performance.
+## CPU model comparison — 13 November 2026
+
+See [STT-MODEL-COMPARISON.md](STT-MODEL-COMPARISON.md) for measured speed, RAM, provisional reference error rates and the real Hermes review. Run `.venv\Scripts\python.exe scripts\compare_stt.py` to repeat the local-only development comparison on the supplied 113-second scope. Each model uses a separate process; failures remain failures. This script is specific to the supplied conversation/reference; it does not silently label arbitrary scripts as ground truth.
+
+ONNX models always split uploaded recordings internally at quiet boundaries near 15 seconds to bound working memory. Single-file mode therefore describes one submitted job, not necessarily one neural decoder invocation. The ledger records actual local decoder calls. These chunks are not live microphone streaming.
+
+To install an alternative ONNX model: `.venv\Scripts\python.exe scripts\prepare_models.py --profile indicconformer`. Whisper conversion still requires a separate conversion environment with CPU Torch, Transformers and CTranslate2; normal setup no longer installs those heavy tools. Configure `DEFAULT_STT_PROFILE` to change the API default.
+
+The current laptop can run the complete Zipformer → speaker clustering → Mistral pipeline. This does not certify transcript, medical-fact or identity accuracy. Speaker DER and role/fact accuracy require their own human annotations. A nearby script-derived reference is marked provisional until its verbatim wording and endpoint match the exact audio.
+
+Developer checks: `.venv\Scripts\python.exe -m pytest tests -q --basetemp=data/test-temp`. `pytest.ini` restricts collection to project tests and excludes runtime/tool caches. Frontend and backend sources are formatted; recognition adapters live in `backend/stt.py`, orchestration in `backend/pipeline.py`, scoring in `backend/evaluation.py` and provider access in `backend/llm.py`.
+
+
+## Live conversation, noise removal and voice signatures
+
+These features are implemented and enabled when their model files are ready. See [FEATURE-VERIFICATION.md](FEATURE-VERIFICATION.md) for actual tests and limits.
+
+- **Live conversation:** give recording permission, choose final options, and click Start live microphone. AudioWorklet sends mono 16-bit PCM at 16 kHz over `/api/live`. Stop & analyze closes microphone tracks, flushes the decoder and hands the saved WAV to final analysis. A 20-minute session limit, two-second maximum frame size, bounded WebSocket queue and client backpressure protect this CPU setup. Refresh/disconnect cancels an incomplete capture; finalized runs persist.
+- **GTCRN noise removal:** select Apply local GTCRN noise removal before a batch or live-final run. Original source is preserved. Results include enhanced clip playback. Synthetic-noise experiments also record before/after same-timeline SNR and SI-SDR using the original recording as a surrogate clean reference; these metrics are not real-clinic accuracy. Enhancement can harm intelligibility, so it is optional.
+- **Voice signatures:** upload 3–30 seconds of a single speaker, provide name/role and explicit biometric consent. Prefer 10–20 seconds of clear speech. Local VAD rejects insufficient speech. A normalized ERes2Net embedding and profile metadata are Fernet-encrypted. On Windows the encryption key is itself wrapped by current-user DPAPI. Raw temporary enrollment files are deleted after processing, including failures.
+- **Matching:** enable Match against enrolled voice signatures. Non-overlapping speaker audio is compared by cosine similarity. Initial threshold 0.70 and top-two margin 0.10 are conservative defaults, not calibrated guarantees. Unknown/ambiguous matches stay unknown. Enrolled role metadata and LLM-inferred conversation roles are displayed separately. No speaker verification/liveness or anti-spoofing claim is made.
+- **Deletion/privacy:** Delete signature removes the biometric template from the active encrypted store. Historical benchmark reports retain their audit labels/similarity results, not embeddings. Neither templates nor local profile metadata are sent to the LLM, including extraction-only retries. Recorded words may still contain names; transcript sharing remains separately permission-gated.
+- **Keys/portability:** Windows profile storage is bound to the Windows account. Re-enroll on another computer/account; do not expect copying DPAPI files to unlock them there. Non-Windows deployments must set a Fernet `VOICE_ENCRYPTION_KEY` in protected server configuration. Keys/templates are never served as static assets. Run one backend process per workspace; this loopback research app is not a public multi-user service.
+
+`SETUP-BACKEND.cmd` now also runs `scripts/prepare_feature_models.py` for the small Vosk INT8 streaming and GTCRN assets. It records pinned revision and model hashes in `MODELS_DIR/feature-manifest.json`. The original final ASR remains Zipformer by default because the streaming model was less accurate on the provisional script comparison.
+
+Developer tests: install `requirements-dev.txt` for Playwright and Ruff. Browser checks use installed Chrome, not a downloaded browser. `scripts/test_feature_integration.py` exercises real local models and a real WebSocket; `scripts/browser_features.py` exercises AudioWorklet and the microphone path with controlled fake audio. Both create uniquely marked temporary profiles and delete them. Such same-source smoke tests prove the feature path, not identification accuracy.
